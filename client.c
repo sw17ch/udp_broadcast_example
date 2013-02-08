@@ -6,6 +6,7 @@
 #include <netdb.h>
 #include <stdint.h>
 #include <errno.h>
+#include <arpa/inet.h>
 
 #include "shared.h"
 
@@ -36,7 +37,7 @@ int communicate(int sck, char * host, char * port) {
   uint8_t buffer[128] = {0};
   struct hostent * he;
   struct sockaddr_in remote;
-  struct sockaddr from;
+  struct sockaddr_storage from;
   socklen_t from_len;
 
   if (NULL == (he = gethostbyname(host))) {
@@ -54,13 +55,24 @@ int communicate(int sck, char * host, char * port) {
     fprintf(stderr, "Unable to 'sendto': %s\n", strerror(errno));
     return -2;
   }
-  len = recvfrom(sck, buffer, sizeof(buffer), 0, &from, &from_len);
+  len = recvfrom(sck, buffer, sizeof(buffer), 0, (struct sockaddr *)&from, &from_len);
   if (errno) {
     fprintf(stderr, "Unable to 'recvfrom': %s\n", strerror(errno));
     return -3;
   }
 
-  printf("Got: %s\n", buffer);
+  char addr[32];
+
+  inet_ntop(
+      from.ss_family,
+      get_in_addr((struct sockaddr *)&from),
+      addr,
+      sizeof(addr));
+
+  printf("Message from %s:%u: %s\n",
+      addr,
+      ntohs((*((struct sockaddr_in *)&from)).sin_port),
+      buffer);
 
   return 0;
 }
