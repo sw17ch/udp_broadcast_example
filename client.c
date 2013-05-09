@@ -27,6 +27,7 @@ int main(int argc, char * argv[]) {
 
   if (0 > (sck = setup_socket())) {
     fprintf(stderr, "Failed to bind socket. Error: %d\n", sck);
+    return sck;
   }
 
   return communicate(sck, remote_addr, remote_port);
@@ -38,7 +39,7 @@ int communicate(int sck, char * host, char * port) {
   struct hostent * he;
   struct sockaddr_in remote;
   struct sockaddr_storage from;
-  socklen_t from_len;
+  socklen_t from_len = sizeof(from);
 
   if (NULL == (he = gethostbyname(host))) {
     return -1;
@@ -49,30 +50,42 @@ int communicate(int sck, char * host, char * port) {
   remote.sin_addr = *(struct in_addr *)he->h_addr;
   memset(remote.sin_zero, 0, sizeof(remote.sin_zero));
 
-  int len;
-  len = sendto(sck, msg, sizeof(msg), 0, (struct sockaddr *)&remote, sizeof(remote));
-  if (errno) {
+  /* Send the broadcast packet. */
+  int len = sendto(sck, msg, sizeof(msg), 0, (struct sockaddr *)&remote, sizeof(remote));
+
+  if (0 > len) {
     fprintf(stderr, "Unable to 'sendto': %s\n", strerror(errno));
     return -2;
   }
-  len = recvfrom(sck, buffer, sizeof(buffer), 0, (struct sockaddr *)&from, &from_len);
-  if (errno) {
-    fprintf(stderr, "Unable to 'recvfrom': %s\n", strerror(errno));
-    return -3;
+  while (1) {
+    len = recvfrom(sck, buffer, sizeof(buffer), 0, (struct sockaddr *)&from, &from_len);
+
+    if (EWOULDBLOCK == errno) {
+      // recv timed out. exit normally.
+      return 0;
+    } else if (0 > len) {
+      fprintf(stderr, "Unable to 'recvfrom': %s (%d)\n", strerror(errno), errno);
+      return -3;
+    }
+
+    char addr[40] = {0};
+
+    const char * ptr = inet_ntop(
+                          from.ss_family,
+                          get_in_addr((struct sockaddr *)&from),
+                          addr,
+                          sizeof(addr));
+
+    printf("Message from %s:%u of length %d: 0x",
+        ptr,
+        ntohs((*((struct sockaddr_in *)&from)).sin_port),
+        len);
+
+    for (int i = 0; i < len; i++) {
+        printf("%02X", buffer[i]);
+    }
+    printf("\n");
   }
-
-  char addr[32];
-
-  inet_ntop(
-      from.ss_family,
-      get_in_addr((struct sockaddr *)&from),
-      addr,
-      sizeof(addr));
-
-  printf("Message from %s:%u: %s\n",
-      addr,
-      ntohs((*((struct sockaddr_in *)&from)).sin_port),
-      buffer);
 
   return 0;
 }
